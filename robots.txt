@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://almoutazeyad75-droid.github.io/dead-hours-eyad/sitemap.xml
