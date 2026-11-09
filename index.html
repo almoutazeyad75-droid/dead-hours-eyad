@@ -172,6 +172,7 @@ button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
       <p><button class="opt" type="button" id="onManGo" style="flex:none"><b>Connect</b></button> <button class="opt" type="button" id="onManAdd" style="flex:none" hidden><b>Add another player</b></button></p>
     </div>
     <p class="tag" id="onParty"></p>
+    <p class="tag" id="onDbg" style="font-size:11px;opacity:.7"></p>
     <p class="tag" id="onMsg"></p>
   </div>
 
@@ -2493,7 +2494,7 @@ function netLostHost(){
 }
 
 /* ---- manual (peer to peer) connection: a 2 person "room" over a WebRTC data channel */
-const RTC_CFG={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+const RTC_CFG={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'},{urls:['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'],username:'openrelayproject',credential:'openrelayproject'}]};
 function b64e(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
 function b64d(t){t=t.replace(/-/g,'+').replace(/_/g,'/');while(t.length%4)t+='=';const s=atob(t),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u;}
 async function codeEnc(d,id){
@@ -2507,7 +2508,7 @@ async function codeDec(c){
   else j=new TextDecoder().decode(b64d(c.slice(1)));
   const o=JSON.parse(j);return {type:o.t,sdp:o.s,id:o.i||''};
 }
-function iceDone(pc){return new Promise(res=>{if(pc.iceGatheringState==='complete')return res();const f=()=>{if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',f);res();}};pc.addEventListener('icegatheringstatechange',f);setTimeout(res,5000);});}
+function iceDone(pc){return new Promise(res=>{if(pc.iceGatheringState==='complete')return res();const f=()=>{if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',f);res();}};pc.addEventListener('icegatheringstatechange',f);setTimeout(res,4000);});}
 function p2pRoom(myId,otherId){
   const st={mine:{},other:null,hs:[],cs:[],dc:null,pc:null,open:false,seq:0,rseq:-1,sendT:0};
   const mk=(id,pr,isMe)=>Object.freeze({peer:id,isMe,sameTab:isMe,kind:'viewer',guest:false,by:null,presence:Object.freeze(Object.assign({},pr)),updatedAt:Date.now()});
@@ -2569,61 +2570,100 @@ async function p2pAnswer(code){
   await pc.setRemoteDescription(offer);await pc.setLocalDescription(await pc.createAnswer());await iceDone(pc);
   return {room,pc,code:await codeEnc(pc.localDescription)};
 }
-/* ---- short code connection: a tiny signaling socket (PeerJS public server protocol) + the same WebRTC channel */
+/* ---- short code connection: signaling over two public relays (PeerJS cloud + ntfy) then a direct WebRTC channel */
 const SIG=Object.assign({host:'0.peerjs.com',port:443,secure:true,path:'/',key:'peerjs'},window.__PJ_CFG||{});
+const NTF=Object.assign({host:'ntfy.sh',secure:true},window.__NTFY_CFG||{});
 const rid=()=>Math.random().toString(36).slice(2,12);
 function newCode(){return Array.from({length:5},()=>CODEC[Math.floor(Math.random()*CODEC.length)]).join('');}
-function sigOpen(id,onmsg){
+function dbg(m){NET.dbg=(NET.dbg||[]).concat([m]).slice(-5);try{netRender();}catch(e){}}
+async function zpack(str){
+  try{const cs=new CompressionStream('deflate-raw'),w=cs.writable.getWriter();w.write(new TextEncoder().encode(str));w.close();return 'Z'+b64e(new Uint8Array(await new Response(cs.readable).arrayBuffer()));}
+  catch(e){return 'R'+b64e(new TextEncoder().encode(str));}
+}
+async function zunpack(t){
+  if(t[0]==='Z'){const ds=new DecompressionStream('deflate-raw'),w=ds.writable.getWriter();w.write(b64d(t.slice(1)));w.close();return new TextDecoder().decode(await new Response(ds.readable).arrayBuffer());}
+  return new TextDecoder().decode(b64d(t.slice(1)));
+}
+function sigPeerjs(id,onmsg){
   return new Promise((res,rej)=>{
     let ws,ok=false,hb=0;
     try{ws=new WebSocket(`${SIG.secure?'wss':'ws'}://${SIG.host}:${SIG.port}${SIG.path}peerjs?key=${SIG.key}&id=${id}&token=${rid()}`);}catch(e){return rej({code:'ws'});}
-    const to=setTimeout(()=>{try{ws.close();}catch(e){}rej({code:'timeout'});},10000);
+    const to=setTimeout(()=>{try{ws.close();}catch(e){}rej({code:'timeout'});},8000);
     ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
       if(m.type==='OPEN'&&!ok){ok=true;clearTimeout(to);hb=setInterval(()=>{try{ws.send('{"type":"HEARTBEAT"}');}catch(e){}},5000);
-        res({send:o=>{try{ws.send(JSON.stringify(o));}catch(e){}},close(){clearInterval(hb);try{ws.close();}catch(e){}}});}
+        res({name:'peerjs',send:o=>{try{ws.send(JSON.stringify({type:o.type,dst:o.dst,payload:o.payload}));}catch(e){}},close(){clearInterval(hb);try{ws.close();}catch(e){}}});}
       else if(m.type==='ID-TAKEN'||m.type==='INVALID-KEY'){clearTimeout(to);rej({code:m.type});}
       else if(ok)onmsg(m);};
     ws.onerror=()=>{if(!ok){clearTimeout(to);rej({code:'ws'});}};
     ws.onclose=()=>{if(!ok){clearTimeout(to);rej({code:'ws'});}};
   });
 }
+function sigNtfy(id,onmsg){
+  return new Promise((res,rej)=>{
+    let ws,ok=false;
+    const http=`${NTF.secure?'https':'http'}://${NTF.host}`;
+    try{ws=new WebSocket(`${NTF.secure?'wss':'ws'}://${NTF.host}/${id}/ws`);}catch(e){return rej({code:'ws'});}
+    const to=setTimeout(()=>{try{ws.close();}catch(e){}rej({code:'timeout'});},8000);
+    ws.onmessage=async ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
+      if(m.event==='open'&&!ok){ok=true;clearTimeout(to);
+        res({name:'ntfy',send:async o=>{try{await fetch(`${http}/${o.dst}`,{method:'POST',body:await zpack(JSON.stringify({type:o.type,src:id,payload:o.payload}))});}catch(e){}},close(){try{ws.close();}catch(e){}}});}
+      else if(m.event==='message'&&ok){try{onmsg(JSON.parse(await zunpack(m.message)));}catch(e){}}};
+    ws.onerror=()=>{if(!ok){clearTimeout(to);rej({code:'ws'});}};
+    ws.onclose=()=>{if(!ok){clearTimeout(to);rej({code:'ws'});}};
+  });
+}
+/* opens every relay at once; resolves when the first one is ready, later ones join in */
+function sigConnect(id,onmsg){
+  return new Promise((res,rej)=>{
+    const live=[],mux={live,send:o=>live.forEach(l=>l.send(o)),close(){mux.closed=true;live.forEach(l=>l.close());}};
+    let done=false,fails=0,idTaken=false;const jobs=[['peerjs',sigPeerjs],['ntfy',sigNtfy]];
+    for(const [nm,fn] of jobs){
+      fn(id,onmsg).then(r=>{
+        if(mux.closed){r.close();return;}
+        live.push(r);dbg('Relay '+nm+': connected');
+        if(!done){done=true;res(mux);}
+      }).catch(e=>{
+        fails++;dbg('Relay '+nm+': '+((e&&e.code)||'failed'));
+        if(e&&e.code==='ID-TAKEN')idTaken=true;
+        if(!done&&fails===jobs.length){done=true;rej({code:idTaken?'ID-TAKEN':'noserver'});}
+        else if(idTaken&&!done){done=true;mux.close();rej({code:'ID-TAKEN'});}
+      });
+    }
+  });
+}
 async function sigHost(code){
-  const hub=p2pHub(),pcs={},qs={};let sg;
-  sg=await sigOpen('dh1-'+code.toLowerCase(),async m=>{
-    const src=m.src;if(!src)return;
+  const hub=p2pHub(),pcs={};let sg;
+  sg=await sigConnect('dh1-'+code.toLowerCase(),async m=>{
+    const src=m.src;if(!src||m.type!=='OFFER'||pcs[src])return;
     try{
-      if(m.type==='OFFER'){
-        const pc=new RTCPeerConnection(RTC_CFG);pcs[src]=pc;qs[src]=[];
-        const room=hub.addConn(src);room._st.pc=pc;
-        pc.ondatachannel=e=>room._attach(e.channel);
-        pc.onicecandidate=e=>{if(e.candidate)sg.send({type:'CANDIDATE',dst:src,payload:{candidate:e.candidate}});};
-        await pc.setRemoteDescription(m.payload.sdp);
-        for(const c of qs[src])await pc.addIceCandidate(c).catch(()=>{});qs[src]=[];
-        await pc.setLocalDescription(await pc.createAnswer());
-        sg.send({type:'ANSWER',dst:src,payload:{sdp:pc.localDescription}});
-      }else if(m.type==='CANDIDATE'){
-        const pc=pcs[src];if(pc&&pc.remoteDescription)pc.addIceCandidate(m.payload.candidate).catch(()=>{});else(qs[src]=qs[src]||[]).push(m.payload.candidate);
-      }
-    }catch(e){console.error(e);}
+      const pc=new RTCPeerConnection(RTC_CFG);pcs[src]=pc;
+      dbg('A friend is connecting...');NET.msg='A friend is connecting...';
+      const room=hub.addConn(src);room._st.pc=pc;
+      pc.ondatachannel=e=>room._attach(e.channel);
+      pc.oniceconnectionstatechange=()=>dbg('Link: '+pc.iceConnectionState);
+      await pc.setRemoteDescription(m.payload.sdp);
+      await pc.setLocalDescription(await pc.createAnswer());await iceDone(pc);
+      sg.send({type:'ANSWER',dst:src,payload:{sdp:pc.localDescription}});
+    }catch(e){console.error(e);dbg('Error: '+(e&&e.message));}
   });
   hub._sg=sg;return hub;
 }
 async function sigJoin(code){
   const id='dh1c-'+rid(),hostId='dh1-'+code.toLowerCase(),pc=new RTCPeerConnection(RTC_CFG),room=p2pRoom(id,'H');
   room._st.pc=pc;room._attach(pc.createDataChannel('g',{ordered:false,maxRetransmits:0}));
-  let rdy=false,q=[],sg;
-  sg=await sigOpen(id,async m=>{
+  let got=false,sg;
+  pc.oniceconnectionstatechange=()=>dbg('Link: '+pc.iceConnectionState);
+  sg=await sigConnect(id,async m=>{
     try{
-      if(m.type==='ANSWER'){await pc.setRemoteDescription(m.payload.sdp);rdy=true;for(const c of q)await pc.addIceCandidate(c).catch(()=>{});q=[];}
-      else if(m.type==='CANDIDATE'){if(rdy)pc.addIceCandidate(m.payload.candidate).catch(()=>{});else q.push(m.payload.candidate);}
-      else if(m.type==='EXPIRE'&&!room._st.open){NET.msg='No host found with that code. Check the code, and make sure the host pressed Host a game.';netRender();}
+      if(m.type==='ANSWER'&&!got){got=true;dbg('Host answered');await pc.setRemoteDescription(m.payload.sdp);}
+      else if(m.type==='EXPIRE'&&!room._st.open&&!got){NET.msg='No host found with that code. Check the code, and make sure the host pressed Host a game.';netRender();}
     }catch(e){console.error(e);}
   });
   room._sg=sg;
-  pc.onicecandidate=e=>{if(e.candidate)sg.send({type:'CANDIDATE',dst:hostId,payload:{candidate:e.candidate}});};
   room.onConnection(c=>{if(c)setTimeout(()=>sg.close(),1500);});
-  await pc.setLocalDescription(await pc.createOffer());
-  sg.send({type:'OFFER',dst:hostId,payload:{sdp:pc.localDescription}});
+  await pc.setLocalDescription(await pc.createOffer());await iceDone(pc);
+  sg.send({type:'OFFER',dst:hostId,payload:{sdp:pc.localDescription}});dbg('Request sent to the code');
+  setTimeout(()=>{if(NET.room===room&&!room._st.open&&NET.role==='client'){NET.msg=got?'The host answered but the direct link failed. Your network may block it. Try the same wifi, or use Manual connection.':'No answer from the host. Check the code, and make sure the host is on this same website and pressed Host a game.';netRender();}},25000);
   return room;
 }
 function netWire(){
@@ -2676,7 +2716,7 @@ async function netManualAuto(){
 function netLeave(){
   NET.p2p=null;NET.pendOpen=false;
   if(NET.room){for(const o of NET.offs){try{o();}catch(e){}}try{NET.room.leave();}catch(e){}}
-  NET.offs=[];NET.room=null;NET.role=null;NET.peer=null;NET.hostPeer=null;NET.myPeer=null;NET.rq=null;NET.reqs=[];NET.party=[];NET.hcs={};NET.pty=[];NET.declined=[];NET.initId='';NET.hostInit='';NET.hc=[0,0,0,0,0];NET.c={a:0,q:0,m:0,f:0,p:0};NET.msg='';NET.pm={};NET.evl=[];NET.conn=false;NET.n=1;
+  NET.offs=[];NET.room=null;NET.role=null;NET.peer=null;NET.hostPeer=null;NET.myPeer=null;NET.rq=null;NET.reqs=[];NET.party=[];NET.hcs={};NET.pty=[];NET.declined=[];NET.initId='';NET.hostInit='';NET.hc=[0,0,0,0,0];NET.c={a:0,q:0,m:0,f:0,p:0};NET.msg='';NET.pm={};NET.evl=[];NET.conn=false;NET.n=1;NET.dbg=[];
 }
 async function netGetRoom(){
   if(!NET.rtP)return null;
@@ -2689,7 +2729,7 @@ async function netOpen(role,code,onFail){
     try{
       if(role==='host'){let hub=null,last=null;for(let i=0;i<6&&!hub;i++){try{hub=await sigHost(NET.code);}catch(e){last=e;if(!e||e.code!=='ID-TAKEN')throw e;NET.code=newCode();}}if(!hub)throw last;NET.room=hub;}
       else NET.room=await sigJoin(code);
-    }catch(e){NET.room=null;NET.role=null;NET.manual=true;$('#onManual').checked=true;NET.msg='Could not reach the connection server. Switched to manual connection: use the codes.';netRender();return false;}
+    }catch(e){NET.room=null;NET.role=null;NET.manual=true;$('#onManual').checked=true;NET.msg='Could not reach the connection servers from this network or page. Switched to manual connection: use the codes.';netRender();return false;}
     NET.sig=true;netWire();return true;
   }
   NET.rt=rt;
@@ -2709,7 +2749,7 @@ async function netHost(){
   NET.msg='Opening a room...';netRender();
   if(!await netOpen('host',NET.code))return;
   netPres({r:'h',pty:['Host'],acc:[]});
-  NET.msg='Give your frend this code. They open the game, press Online, then Join a game, type the code and press Send request.';netRender();
+  NET.msg='Give your frend this code. They open the game, press Online, then Join a game, type the code and press Send request.'+(NET.sig?'':' Your friend must open this same Claude page. If they cannot, both of you can use the public site instead: almoutazeyad75-droid.github.io/dead-hours-eyad');netRender();
 }
 async function netJoin(){
   const code=$('#onCodeIn').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
@@ -2745,6 +2785,7 @@ function netRender(){
   $('#onParty').textContent=NET.role&&names.length?`Party ${names.length}/10: ${names.join(', ')}. ${names.length>=6?'2 killers':'1 killer'} this round.`:'';
   const st=NET.room?` (${NET.conn?'connected':'connecting...'}, ${NET.n} in room)`:'';
   $('#onMsg').textContent=(NET.msg||'')+st;
+  $('#onDbg').textContent=NET.role&&NET.dbg&&NET.dbg.length?'Status: '+NET.dbg.join(' | '):'';
 }
 $('#modeRow').addEventListener('click',()=>netRender());
 $('#onHost').onclick=async()=>{NET.joinOpen=false;if(await netManualAuto())netHostManual();else netHost();};
