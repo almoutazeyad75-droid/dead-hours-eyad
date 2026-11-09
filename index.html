@@ -158,6 +158,7 @@ button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
     </div>
     <div id="onHostBox" hidden>
       <p class="tag">Room code: <b id="onCode" style="font-size:26px;letter-spacing:.2em;color:var(--amber)"></b></p>
+      <label class="chk" style="margin:6px 0"><input id="onAuto" type="checkbox" checked> Let friends in automatically (no request to accept)</label>
       <div id="onReqs"></div>
     </div>
     <div id="onJoinBox" hidden>
@@ -2388,6 +2389,7 @@ function hostSync(ch){
     }
   }
   if(JSON.stringify(reqs)!==JSON.stringify(NET.reqs)){NET.reqs=reqs;netRender();}
+  if($('#onAuto').checked&&!(G&&G.host&&!G.over))for(const r of reqs.slice())netAccept(r.peer,true);
   for(const p of ch.left)if(known.has(p.peer))netPeerLeft(p.peer);
 }
 function netPartyPres(){netPres({acc:NET.party.map(p=>p.peer),pty:['Host'].concat(NET.party.map(p=>p.name))});}
