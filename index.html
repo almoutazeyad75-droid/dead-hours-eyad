@@ -2543,7 +2543,7 @@ function p2pHub(){
   const anyOpen=()=>slots.some(sl=>sl.room._st.open);
   const link=o=>{
     for(const k in mine)o.room._st.mine[k]=mine[k];
-    o.room.onPeers(ch=>{const j=ch.joined.filter(p=>!p.isMe),l=ch.left.filter(p=>!p.isMe);if(j.length||l.length)fire(j,l);});
+    o.room.onPeers(ch=>{fire(ch.joined.filter(p=>!p.isMe),ch.left.filter(p=>!p.isMe));});
     o.room.onConnection(()=>{for(const f of cs.slice())try{f(anyOpen());}catch(e){}});
     slots.push(o);
   };
