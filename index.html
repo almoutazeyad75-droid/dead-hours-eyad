@@ -708,7 +708,7 @@ function newGame(net){
     const sp=pl.filter((_,i)=>!kset.has(i)),kp=pl.filter((_,i)=>kset.has(i));
     const totalS=Math.max(4,sp.length);
     G.pl=[];
-    const link=(p,e,kd,i)=>{if(p.peer===null)G.player=e;else{e.remote=true;e.rid=p.peer;e.nick=p.name;}G.pl.push([p.peer,kd,i,p.name]);};
+    const link=(p,e,kd,i)=>{if(p.peer===null){G.player=e;e.ctrl='both';}else{e.remote=true;e.rid=p.peer;e.nick=p.name;}G.pl.push([p.peer,kd,i,p.name]);};
     sp.forEach((p,i)=>{const q=spawn(i);const e=makeSurv(p.name,p.cls,q.x,q.y,true);G.surv.push(e);link(p,e,'s',i);});
     const others=pool.slice().sort(()=>Math.random()-0.5);
     for(let i=sp.length;i<totalS;i++){const q=spawn(i);G.surv.push(makeSurv(nm[i%nm.length],others[i%others.length],q.x,q.y,false));}
@@ -2269,7 +2269,8 @@ window.addEventListener('contextmenu',e=>e.preventDefault());
 
 
 /* ------------------------------------------------------------------ online (state-based: everything travels in room presence, so any viewer can play) */
-const NET={rt:null,rtP:null,room:null,role:null,code:'',peer:null,hostPeer:null,myPeer:null,rq:null,reqs:[],party:[],hcs:{},pty:[],declined:[],hc:[0,0,0,0,0],c:{a:0,q:0,m:0,f:0,p:0},lastIn:0,sAcc:0,wAcc:0,seq:0,rseq:-1,evId:0,evSeen:0,evl:[],wSeen:-1,endSeen:'',initId:'',hostInit:'',msg:'',offs:[],pm:{},conn:false,n:1,joinOpen:false,name:'Friend'};
+const BUILD='b9-0309';
+const NET={rt:null,rtP:null,room:null,role:null,code:'',peer:null,hostPeer:null,myPeer:null,rq:null,reqs:[],party:[],hcs:{},inAt:{},verWarn:'',lastSnap:0,pty:[],declined:[],hc:[0,0,0,0,0],c:{a:0,q:0,m:0,f:0,p:0},lastIn:0,sAcc:0,wAcc:0,seq:0,rseq:-1,evId:0,evSeen:0,evl:[],wSeen:-1,endSeen:'',initId:'',hostInit:'',msg:'',offs:[],pm:{},conn:false,n:1,joinOpen:false,name:'Friend'};
 const r1=v=>Math.round(v*10)/10,r2=v=>Math.round(v*100)/100;
 function qev(e,to){if(G&&G.host&&G.evq&&G.evq.length<40)G.evq.push(to?{e,to}:e);}
 function netPres(p){
@@ -2338,7 +2339,7 @@ function applyEv(e){
 }
 function applyS(m){
   if(!G||!G.client||G.over)return;
-  if(m.q<=NET.rseq)return;NET.rseq=m.q;
+  if(m.q<=NET.rseq)return;NET.rseq=m.q;NET.lastSnap=performance.now();
   m.a.forEach((a,i)=>{if(G.surv[i])unpackS(G.surv[i],a);});
   (m.k||[]).forEach((a,i)=>{if(G.killers[i])unpackK(G.killers[i],a);});
   for(const L of G.lockers)L.occ=null;for(const v of G.surv)if(v.hideIn)v.hideIn.occ=v;
@@ -2356,6 +2357,7 @@ function netHostTick(dt){
   if(!NET.room||!NET.party.length||G.over)return;
   NET.sAcc+=dt;NET.wAcc+=dt;
   const now=performance.now();
+  if(G.t>6)for(const e of G.surv.concat(G.killers))if(e.remote&&e.rid){const at=NET.inAt[e.rid]||0;if(now-at>3000){if(!e._stale){e._stale=1;feed((e.nick||'A friend')+': no input is arriving. Their connection or version may be the problem.','#c2352b');}}else e._stale=0;}
   while(G.evq.length){const q=G.evq.shift(),arr=Array.isArray(q);NET.evl.push({i:++NET.evId,t:now,to:arr?0:q.to,e:arr?q:q.e});}
   NET.evl=NET.evl.filter(x=>now-x.t<2500).slice(-16);
   if(NET.sAcc>=(NET.party.length>4?1/15:1/20)){
@@ -2377,7 +2379,8 @@ function hostSync(ch){
     const pr=p.presence||{};
     if(p.isMe||pr.r!=='c')continue;
     if(known.has(p.peer)){
-      const d=pr.in;
+      if(pr.v!==BUILD)NET.verWarn=(String(pr.n||'Friend').slice(0,12))+' has a different version of the game ('+(pr.v||'old')+' vs '+BUILD+'). Ask them to refresh the page with Ctrl+Shift+R.';
+      const d=pr.in;if(d)NET.inAt[p.peer]=performance.now();
       if(d&&G&&G.host){
         G.rins[p.peer]={x:+d.x||0,y:+d.y||0,sprint:!!d.sp,act:!!d.ac,st:d.st==null?null:+d.st};
         const c=Array.isArray(d.c)?d.c:[],nm=['actP','q','main','flash','plank'],hc=NET.hcs[p.peer]||(NET.hcs[p.peer]=[0,0,0,0,0]);
@@ -2385,6 +2388,7 @@ function hostSync(ch){
         for(let i=0;i<5;i++)if(c[i]>hc[i]){rp[nm[i]]=true;hc[i]=c[i];}
       }
     }else if(!NET.declined.includes(p.peer)){
+      if(pr.v!==BUILD)NET.verWarn=(String(pr.n||'Friend').slice(0,12))+' has a different version of the game ('+(pr.v||'old')+' vs '+BUILD+'). Ask them to refresh the page with Ctrl+Shift+R, or close and reopen the tab.';
       reqs.push({peer:p.peer,name:String(pr.n||'Friend').replace(/[^\w .-]/g,'').slice(0,12)||'Friend',cls:(pr.cls in CLASSES)?pr.cls:'random',kind:(pr.kind in KILLERS)?pr.kind:'random'});
     }
   }
@@ -2435,6 +2439,7 @@ function clientSync(ch){
     else if(NET.msg.indexOf('Request sent')===0||NET.msg.indexOf('Connecting')===0){NET.msg='Request sent. The host can see you. Wating for them to acept.';netRender();}
     if(!NET.hostPeer)return;
   }
+  if(pr.v!==BUILD&&!NET.verShown){NET.verShown=1;NET.msg='Your game version is different from the host ('+BUILD+' vs '+(pr.v||'old')+'). Refresh the page with Ctrl+Shift+R, or close and reopen the tab.';netRender();}
   if(Array.isArray(pr.pty)&&JSON.stringify(pr.pty)!==JSON.stringify(NET.pty)){NET.pty=pr.pty;netRender();}
   if(pr.init&&pr.init.id!==NET.initId){
     const ids=(pr.e||[]).map(e=>e[0]);NET.evSeen=ids.length?Math.max(...ids):NET.evSeen;
@@ -2467,6 +2472,7 @@ function clientTick(dt){
   for(const s of G.surv){lerpTo(s,0,dt);if(s.hurt>0)s.hurt-=dt;if(s.qcd>0)s.qcd-=dt;if(s.flashCd>0)s.flashCd-=dt;if(s.plankCd>0)s.plankCd-=dt;if(s.sc.active&&s===G.player)s.sc.t=Math.min(s.sc.t+dt,s.sc.dur);if(s.sc.resT>0)s.sc.resT-=dt;}
   for(const kk of G.killers){lerpTo(kk,0,dt);if(kk.atkCd>0)kk.atkCd-=dt;if(kk.qcd>0)kk.qcd-=dt;}
   audioStep(dt);
+  if(NET.lastSnap&&performance.now()-NET.lastSnap>2500){if(!G._nodata){G._nodata=1;feed('No data from the host for a while. Slow or lost connection.','#c2352b');}}else G._nodata=0;
   if(!G.over&&NET.room){
     const v=ctl(CLP);let force=false;
     const c=NET.c;if(v.actP){c.a++;force=true;}if(v.q){c.q++;force=true;}if(v.main){c.m++;force=true;}if(v.flash){c.f++;force=true;}if(v.plank){c.p++;force=true;}
@@ -2480,7 +2486,7 @@ function clientTick(dt){
   padPress={};
 }
 function startClient(init){
-  if(NET.initId===init.id||!(init.pl||[]).some(x=>x[0]===NET.myPeer))return;NET.initId=init.id;NET.rseq=-1;NET.wSeen=-1;NET.endSeen='';
+  if(NET.initId===init.id||!(init.pl||[]).some(x=>x[0]===NET.myPeer))return;NET.initId=init.id;NET.lastSnap=0;NET.rseq=-1;NET.wSeen=-1;NET.endSeen='';
   hideWin();show('#menu',false);show('#end',false);show('#pause',false);
   newGame(init);
   $('#hudBtns').hidden=false;
@@ -2562,7 +2568,7 @@ function p2pHub(){
 async function p2pOffer(sid){
   sid=sid||'C1';
   const pc=new RTCPeerConnection(RTC_CFG),room=p2pRoom('H',sid);room._st.pc=pc;
-  room._attach(pc.createDataChannel('g',{ordered:false,maxRetransmits:0}));
+  room._attach(pc.createDataChannel('g',{ordered:false}));
   await pc.setLocalDescription(await pc.createOffer());await iceDone(pc);
   return {room,pc,code:await codeEnc(pc.localDescription,sid)};
 }
@@ -2652,7 +2658,7 @@ async function sigHost(code){
 }
 async function sigJoin(code){
   const id='dh1c-'+rid(),hostId='dh1-'+code.toLowerCase(),pc=new RTCPeerConnection(RTC_CFG),room=p2pRoom(id,'H');
-  room._st.pc=pc;room._attach(pc.createDataChannel('g',{ordered:false,maxRetransmits:0}));
+  room._st.pc=pc;room._attach(pc.createDataChannel('g',{ordered:false}));
   let got=false,sg;
   pc.oniceconnectionstatechange=()=>dbg('Link: '+pc.iceConnectionState);
   sg=await sigConnect(id,async m=>{
@@ -2679,7 +2685,7 @@ function netWire(){
 async function netHostManual(){
   netLeave();NET.role='host';NET.manStep='host';NET.code='';NET.msg='Making your code...';$('#onManOut').value='';netRender();
   let o;const hub=p2pHub();try{o=await hub.addSlot();}catch(e){NET.role=null;NET.msg='Manual connection is not supported in this browser.';netRender();return;}
-  NET.room=hub;NET.p2p=o;NET.pendOpen=true;netWire();netPres({r:'h',pty:['Host'],acc:[]});
+  NET.room=hub;NET.p2p=o;NET.pendOpen=true;netWire();netPres({r:'h',v:BUILD,pty:['Host'],acc:[]});
   $('#onManOut').value=o.code;
   NET.msg='1) Send your code to your frend. 2) They send back a reply code. 3) Paste the reply below and press Connect. For more players press Add another player.';netRender();
 }
@@ -2703,7 +2709,7 @@ async function netManualGo(){
       NET.msg='Making your reply code...';netRender();
       const a=await p2pAnswer(code);NET.room=a.room;NET.p2p=a;netWire();
       NET.name=($('#onName').value.trim()||'Friend').slice(0,12);
-      netPres({r:'c',n:NET.name,cls:cfg.cls,kind:cfg.kind});
+      netPres({r:'c',n:NET.name,cls:cfg.cls,kind:cfg.kind,v:BUILD});
       $('#onManOut').value=a.code;NET.msg='Send your reply code (above) back to the host. When they press Connect you are linked.';
     }
   }catch(e){NET.msg='That code did not work. Copy the whole code, with nothing missing.';}
@@ -2750,7 +2756,7 @@ async function netHost(){
   netLeave();NET.role='host';NET.code=newCode();
   NET.msg='Opening a room...';netRender();
   if(!await netOpen('host',NET.code))return;
-  netPres({r:'h',pty:['Host'],acc:[]});
+  netPres({r:'h',v:BUILD,pty:['Host'],acc:[]});
   NET.msg='Give your frend this code. They open the game, press Online, then Join a game, type the code and press Send request.'+(NET.sig?'':' Your friend must open this same Claude page. If they cannot, both of you can use the public site instead: almoutazeyad75-droid.github.io/dead-hours-eyad');netRender();
 }
 async function netJoin(){
@@ -2759,7 +2765,7 @@ async function netJoin(){
   const name=($('#onName').value.trim()||'Friend').slice(0,12);
   netLeave();NET.role='client';NET.code=code;NET.name=name;NET.msg='Connecting...';netRender();
   if(!await netOpen('client',code))return;
-  netPres({r:'c',n:name,cls:cfg.cls,kind:cfg.kind});
+  netPres({r:'c',n:name,cls:cfg.cls,kind:cfg.kind,v:BUILD});
   NET.msg='Request sent. Looking for the host...';netRender();
   setTimeout(()=>{if(NET.role==='client'&&!NET.hostPeer&&NET.msg.indexOf('Looking')===0){NET.msg='No host found with that code yet. Check the code, and make sure the host pressed Host a game on the same link.';netRender();}},6000);
 }
@@ -2787,7 +2793,7 @@ function netRender(){
   $('#onParty').textContent=NET.role&&names.length?`Party ${names.length}/10: ${names.join(', ')}. ${names.length>=6?'2 killers':'1 killer'} this round.`:'';
   const st=NET.room?` (${NET.conn?'connected':'connecting...'}, ${NET.n} in room)`:'';
   $('#onMsg').textContent=(NET.msg||'')+st;
-  $('#onDbg').textContent=NET.role&&NET.dbg&&NET.dbg.length?'Status: '+NET.dbg.join(' | '):'';
+  $('#onDbg').textContent=(NET.role&&NET.dbg&&NET.dbg.length?'Status: '+NET.dbg.join(' | ')+' | ':'')+'Version '+BUILD+(NET.verWarn&&NET.role==='host'?'. WARNING: '+NET.verWarn:'');
 }
 $('#modeRow').addEventListener('click',()=>netRender());
 $('#onHost').onclick=async()=>{NET.joinOpen=false;if(await netManualAuto())netHostManual();else netHost();};
