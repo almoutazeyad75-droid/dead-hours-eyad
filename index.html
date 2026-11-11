@@ -2171,6 +2171,7 @@ function txt(s,x,y,size,col,al='left',w='500'){ctx.font=`${w} ${size}px "IBM Ple
 function dtxt(s,x,y,size,col,al='left'){ctx.font=`900 ${size}px "Big Shoulders Display","Arial Narrow",Impact,sans-serif`;ctx.textAlign=al;ctx.fillStyle=col;ctx.fillText(s,x,y);}
 const easeOut=t=>1-Math.pow(1-clamp(t,0,1),3);
 function drawJuice(P){
+  if(NET.role&&(G.client||G.host)&&!G.over){const pv=Object.values(NET.rtt),pg=G.client?NET.ping:(pv.length?Math.max.apply(null,pv):0),col=pg<90?'#8fe39a':pg<180?'#ffd86a':'#ff6a6a';txt((G.client?'PING ':'WORST PING ')+(pg||'-')+'ms',VW-12,VH-10,11,col,'right','600');}
   if(G.punch>0.03){ctx.fillStyle=`rgba(255,40,40,${Math.min(0.7,G.punch*5)})`;ctx.fillRect(0,0,7,VH);ctx.fillRect(VW-7,0,7,VH);ctx.fillStyle=`rgba(40,255,255,${Math.min(0.55,G.punch*4)})`;ctx.fillRect(7,0,3,VH);ctx.fillRect(VW-10,0,3,VH);}
   if(G.surge>0.02){
     const a=G.surge;ctx.fillStyle=`rgba(150,255,190,${a*0.16})`;ctx.fillRect(0,0,VW,VH);
@@ -2433,8 +2434,8 @@ window.addEventListener('contextmenu',e=>e.preventDefault());
 
 
 /* ------------------------------------------------------------------ online (state-based: everything travels in room presence, so any viewer can play) */
-const BUILD='b14-1111';
-const NET={rt:null,rtP:null,room:null,role:null,code:'',peer:null,hostPeer:null,myPeer:null,rq:null,reqs:[],party:[],hcs:{},inAt:{},verWarn:'',lastSnap:0,pty:[],declined:[],hc:[0,0,0,0,0],c:{a:0,q:0,m:0,f:0,p:0},lastIn:0,sAcc:0,wAcc:0,seq:0,rseq:-1,evId:0,evSeen:0,evl:[],wSeen:-1,endSeen:'',initId:'',hostInit:'',msg:'',offs:[],pm:{},conn:false,n:1,joinOpen:false,name:'Friend'};
+const BUILD='b15-1111';
+const NET={rt:null,rtP:null,room:null,role:null,code:'',peer:null,hostPeer:null,myPeer:null,rq:null,reqs:[],party:[],hcs:{},inAt:{},rtt:{},ping:0,hts:0,tries:0,recon:false,lastCode:'',lastName:'',verWarn:'',lastSnap:0,pty:[],declined:[],hc:[0,0,0,0,0],c:{a:0,q:0,m:0,f:0,p:0},lastIn:0,sAcc:0,wAcc:0,seq:0,rseq:-1,evId:0,evSeen:0,evl:[],wSeen:-1,endSeen:'',initId:'',hostInit:'',msg:'',offs:[],pm:{},conn:false,n:1,joinOpen:false,name:'Friend'};
 const r1=v=>Math.round(v*10)/10,r2=v=>Math.round(v*100)/100;
 function qev(e,to){if(G&&G.host&&G.evq&&G.evq.length<40)G.evq.push(to?{e,to}:e);}
 function netPres(p){
@@ -2509,11 +2510,11 @@ function applyS(m){
   for(const L of G.lockers)L.occ=null;for(const v of G.surv)if(v.hideIn)v.hideIn.occ=v;
 }
 /* ---- host side */
-function netSendInit(){
+function netSendInit(rj){
   const id=Math.random().toString(36).slice(2,9);NET.hostInit=id;NET.evl=[];
   const init={id,seed:G.seed,mod:G.mod,diff:G.cfg.diff,
     surv:G.surv.map(s=>({n:s.name,c:s.cls,p:s.perk,h:s.maxHp,m:s.maxStam})),
-    kil:G.killers.map(k=>({t:k.type,p:k.perk,a:k.isPlayer?0:1})),pl:G.pl};
+    kil:G.killers.map(k=>({t:k.type,p:k.perk,a:k.isPlayer?0:1})),pl:G.pl,rj:rj?1:0};
   NET.sAcc=1;NET.wAcc=1;
   netPres({init,end:null,s:null,w:null,e:[]});
 }
@@ -2526,7 +2527,7 @@ function netHostTick(dt){
   NET.evl=NET.evl.filter(x=>now-x.t<2500).slice(-16);
   if(NET.sAcc>=(NET.party.length>4?1/15:1/20)){
     NET.sAcc=0;
-    const patch={s:{q:++NET.seq,a:G.surv.map(packS),k:G.killers.map(packK)},e:NET.evl.map(x=>[x.i,x.to||0].concat(x.e))};
+    const patch={s:{q:++NET.seq,a:G.surv.map(packS),k:G.killers.map(packK)},e:NET.evl.map(x=>[x.i,x.to||0].concat(x.e)),ts:Math.round(now),rt:Object.assign({},NET.rtt)};
     if(NET.wAcc>=0.25){NET.wAcc=0;patch.w=packW();}
     if(JSON.stringify(Object.assign({},NET.pm,patch)).length>3800)patch.e=patch.e.filter(x=>x[2]!=='p');
     if(JSON.stringify(Object.assign({},NET.pm,patch)).length>3800)patch.e=[];
@@ -2544,7 +2545,7 @@ function hostSync(ch){
     if(p.isMe||pr.r!=='c')continue;
     if(known.has(p.peer)){
       if(pr.v!==BUILD)NET.verWarn=(String(pr.n||'Friend').slice(0,12))+' has a different version of the game ('+(pr.v||'old')+' vs '+BUILD+'). Ask them to refresh the page with Ctrl+Shift+R.';
-      const d=pr.in;if(d)NET.inAt[p.peer]=performance.now();
+      const d=pr.in;if(d){NET.inAt[p.peer]=performance.now();if(d.h){const rt=performance.now()-d.h;if(rt>0&&rt<5000)NET.rtt[p.peer]=Math.round((NET.rtt[p.peer]||rt)*0.7+rt*0.3);}}
       if(d&&G&&G.host){
         G.rins[p.peer]={x:+d.x||0,y:+d.y||0,sprint:!!d.sp,act:!!d.ac,st:d.st==null?null:+d.st};
         const c=Array.isArray(d.c)?d.c:[],nm=['actP','q','main','flash','plank'],hc=NET.hcs[p.peer]||(NET.hcs[p.peer]=[0,0,0,0,0]);
@@ -2557,6 +2558,11 @@ function hostSync(ch){
     }
   }
   if(JSON.stringify(reqs)!==JSON.stringify(NET.reqs)){NET.reqs=reqs;netRender();}
+  if(G&&G.host&&!G.over)for(const r of reqs.slice()){
+    const lc=r.name.toLowerCase(),now=performance.now();
+    const e=G.surv.concat(G.killers).find(x=>x._gone===lc||(x.remote&&x.nick&&x.nick.toLowerCase()===lc&&now-(NET.inAt[x.rid]||0)>3000));
+    if(e)netReclaim(r,e);
+  }
   if($('#onAuto').checked&&!(G&&G.host&&!G.over))for(const r of reqs.slice())netAccept(r.peer,true);
   for(const p of ch.left)if(known.has(p.peer))netPeerLeft(p.peer);
 }
@@ -2577,8 +2583,8 @@ function netPeerLeft(peer){
   const m=NET.party.find(p=>p.peer===peer);if(!m)return;
   NET.party=NET.party.filter(p=>p.peer!==peer);delete NET.hcs[peer];netPartyPres();
   if(G&&G.host&&!G.over){
-    for(const e of G.surv.concat(G.killers))if(e.rid===peer){e.remote=false;e.isPlayer=false;e.rid=null;}
-    feed(m.name+' disconnected. An AI took over.','#c2352b');
+    for(const e of G.surv.concat(G.killers))if(e.rid===peer){e.remote=false;e.isPlayer=false;e.rid=null;e._gone=m.name.toLowerCase();}
+    feed(m.name+' disconnected. An AI took over. They can rejoin with the same code and name.','#c2352b');
   }
   NET.msg=m.name+' left the party.';netRender();
 }
@@ -2597,6 +2603,7 @@ function clientSync(ch){
   let hp=NET.hostPeer?ch.peers.find(p=>p.peer===NET.hostPeer):ch.peers.find(p=>p.presence&&p.presence.r==='h'&&!p.isMe);
   if(!hp)return;
   const pr=hp.presence||{};
+  if(pr.ts)NET.hts=pr.ts;if(pr.rt&&NET.myPeer&&pr.rt[NET.myPeer]!=null)NET.ping=pr.rt[NET.myPeer];
   if(!NET.hostPeer){
     if(NET.myPeer&&Array.isArray(pr.acc)&&pr.acc.includes(NET.myPeer)){NET.hostPeer=hp.peer;NET.msg='You are in! Wating for the host to start.';netRender();}
     else if(NET.myPeer&&Array.isArray(pr.dec)&&pr.dec.includes(NET.myPeer)&&NET.msg.indexOf('said no')<0){NET.msg='The host said no.';netPres({r:null});netRender();}
@@ -2636,14 +2643,14 @@ function clientTick(dt){
   for(const s of G.surv){lerpTo(s,0,dt);if(s.hurt>0)s.hurt-=dt;if(s.qcd>0)s.qcd-=dt;if(s.flashCd>0)s.flashCd-=dt;if(s.plankCd>0)s.plankCd-=dt;if(s.sc.active&&s===G.player)s.sc.t=Math.min(s.sc.t+dt,s.sc.dur);if(s.sc.resT>0)s.sc.resT-=dt;}
   for(const kk of G.killers){lerpTo(kk,0,dt);if(kk.atkCd>0)kk.atkCd-=dt;if(kk.qcd>0)kk.qcd-=dt;}
   audioStep(dt);
-  if(NET.lastSnap&&performance.now()-NET.lastSnap>2500){if(!G._nodata){G._nodata=1;feed('No data from the host for a while. Slow or lost connection.','#c2352b');}}else G._nodata=0;
+  if(NET.lastSnap&&performance.now()-NET.lastSnap>2500){if(!G._nodata){G._nodata=1;feed('No data from the host for a while. Slow or lost connection.','#c2352b');}if(performance.now()-NET.lastSnap>7000)netRecon();}else G._nodata=0;
   if(!G.over&&NET.room){
     const v=ctl(CLP);let force=false;
     const c=NET.c;if(v.actP){c.a++;force=true;}if(v.q){c.q++;force=true;}if(v.main){c.m++;force=true;}if(v.flash){c.f++;force=true;}if(v.plank){c.p++;force=true;}
     const now=performance.now();
     if(force||now-NET.lastIn>45){
       NET.lastIn=now;const me=G.player;
-      netPres({in:{x:r2(v.x),y:r2(v.y),sp:v.sprint?1:0,ac:v.act?1:0,c:[c.a,c.q,c.m,c.f,c.p],st:(me.k==='s'&&me.sc.active)?r2(me.sc.t):null}});
+      netPres({in:{h:NET.hts,x:r2(v.x),y:r2(v.y),sp:v.sprint?1:0,ac:v.act?1:0,c:[c.a,c.q,c.m,c.f,c.p],st:(me.k==='s'&&me.sc.active)?r2(me.sc.t):null}});
     }
   }
   for(const k of Object.keys(press))delete press[k];
@@ -2653,11 +2660,31 @@ function startClient(init){
   if(NET.initId===init.id||!(init.pl||[]).some(x=>x[0]===NET.myPeer))return;NET.initId=init.id;NET.lastSnap=0;NET.rseq=-1;NET.wSeen=-1;NET.endSeen='';
   hideWin();show('#menu',false);show('#end',false);show('#pause',false);
   newGame(init);
+  if(init.rj)G.t0=-1e9;
   $('#hudBtns').hidden=false;
   if(touchOn)$('#touch').classList.add('on');
   $('#tbHit').style.display=G.player.k==='k'?'flex':'none';
   $('#tbRun').style.display=$('#tbP').style.display=$('#tbF').style.display=G.player.k==='s'?'flex':'none';
   running=true;last=performance.now();acc=0;
+}
+function netRecon(){
+  if(NET.recon||NET.role!=='client'||!G||!G.client||G.over)return;
+  NET.recon=true;feed('Connection lost. Reconnecting...','#c2352b');
+  const tick=async()=>{
+    if(!G||!G.client||G.over||NET.role==='host'){NET.recon=false;return;}
+    if(NET.room&&NET.conn&&NET.lastSnap&&performance.now()-NET.lastSnap<3000){NET.recon=false;feed('Reconnected.','#8fe39a');return;}
+    NET.tries=0;await netJoin(true);
+    setTimeout(tick,7000);
+  };
+  setTimeout(tick,1500);
+}
+function netReclaim(r,e){
+  const oldR=e.rid;
+  if(oldR){NET.party=NET.party.filter(p=>p.peer!==oldR);delete NET.hcs[oldR];}
+  NET.party.push({peer:r.peer,name:r.name,cls:r.cls,kind:r.kind});NET.reqs=NET.reqs.filter(x=>x.peer!==r.peer);NET.hcs[r.peer]=[0,0,0,0,0];
+  e.remote=true;e.isPlayer=true;e.rid=r.peer;e.nick=r.name;e._gone=null;e._stale=0;
+  for(const row of G.pl)if(row[3]===r.name&&row[0]!==null)row[0]=r.peer;
+  netPartyPres();netSendInit(true);feed(r.name+' reconnected.','#8fe39a');
 }
 function netLostHost(){
   NET.hostPeer=null;NET.msg='The host left the game.';
@@ -2835,14 +2862,14 @@ async function sigJoin(code){
   room.onConnection(c=>{if(c)setTimeout(()=>sg.close(),1500);});
   await pc.setLocalDescription(await pc.createOffer());await iceDone(pc);
   sg.send({type:'OFFER',dst:hostId,payload:{sdp:pc.localDescription}});dbg('Request sent to the code');
-  setTimeout(()=>{if(NET.room===room&&!room._st.open&&NET.role==='client'){NET.msg=got?'The host answered but the direct link failed. Your network may block it. Try the same wifi, or use Manual connection.':'No answer from the host. Check the code, and make sure the host is on this same website and pressed Host a game.';netRender();}},25000);
+  setTimeout(()=>{if(NET.room===room&&!room._st.open&&NET.role==='client'&&NET.tries<3&&!NET.hostPeer){NET.tries++;dbg('Retrying ('+NET.tries+'/3)');netJoin(true);return;}if(NET.room===room&&!room._st.open&&NET.role==='client'){NET.msg=got?'The host answered but the direct link failed. Your network may block it. Try the same wifi, or use Manual connection.':'No answer from the host. Check the code, and make sure the host is on this same website and pressed Host a game.';netRender();}},18000);
   return room;
 }
 function netWire(){
   const R=NET.room;
   NET.offs=[
     R.onPeers(ch=>{NET.n=ch.peers.length;if(NET.role==='host')hostSync(ch);else if(NET.role==='client')clientSync(ch);netRender();},e=>{NET.msg='Room error: '+(e&&e.code);netRender();}),
-    R.onConnection(c=>{NET.conn=c;if(c&&NET.manual&&NET.role){NET.msg=NET.role==='host'?'Connected! Wating for your frend request.':'Connected! Request sent. Wating for the host to acept.';}netRender();})
+    R.onConnection(c=>{NET.conn=c;if(!c&&NET.role==='client'&&G&&G.client&&!G.over)netRecon();if(c&&NET.manual&&NET.role){NET.msg=NET.role==='host'?'Connected! Wating for your frend request.':'Connected! Request sent. Wating for the host to acept.';}netRender();})
   ];
   NET.conn=R.connected();
 }
@@ -2923,11 +2950,12 @@ async function netHost(){
   netPres({r:'h',v:BUILD,pty:['Host'],acc:[]});
   NET.msg='Give your frend this code. They open the game, press Online, then Join a game, type the code and press Send request.'+(NET.sig?'':' Your friend must open this same Claude page. If they cannot, both of you can use the public site instead: almoutazeyad75-droid.github.io/dead-hours-eyad');netRender();
 }
-async function netJoin(){
-  const code=$('#onCodeIn').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+async function netJoin(re){
+  const code=re===true?NET.lastCode:$('#onCodeIn').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
   if(code.length<3){NET.msg='Type the room code first.';netRender();return;}
-  const name=($('#onName').value.trim()||'Friend').slice(0,12);
-  netLeave();NET.role='client';NET.code=code;NET.name=name;NET.msg='Connecting...';netRender();
+  const name=re===true?NET.lastName:($('#onName').value.trim()||'Friend').slice(0,12);
+  if(re!==true)NET.tries=0;
+  netLeave();NET.role='client';NET.code=code;NET.name=name;NET.lastCode=code;NET.lastName=name;NET.msg='Connecting...';netRender();
   if(!await netOpen('client',code))return;
   netPres({r:'c',n:name,cls:cfg.cls,kind:cfg.kind,v:BUILD});
   NET.msg='Request sent. Looking for the host...';netRender();
