@@ -8,8 +8,8 @@
 <meta property="og:title" content="Dead Hours Eyad">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://almoutazeyad75-droid.github.io/dead-hours-eyad/">
-<meta property="og:description" content="Dead Hours by Eyad: a free asymmetrical survival game. Play solo, local 2P or online with up to 10 players.">
-<meta name="keywords" content="dead hours, dead hours eyad, eyad game, forsaken, survival game, browser game">
+<meta property="og:description" content="Dead Hours - asymmetrical survival game by eyad. Up to 10 players online.">
+<meta name="keywords" content="dead hours eyad, dead hours, forsaken, survival game, online multiplayer">
 <meta name="description" content="Dead Hours by Eyad: a free asymmetrical survival game. Survivors repair generators, killers hunt. Play solo, local 2P or online with up to 10 players.">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2434,7 +2434,7 @@ window.addEventListener('contextmenu',e=>e.preventDefault());
 
 
 /* ------------------------------------------------------------------ online (state-based: everything travels in room presence, so any viewer can play) */
-const BUILD='b15-1111';
+const BUILD='b16-1111';
 const NET={rt:null,rtP:null,room:null,role:null,code:'',peer:null,hostPeer:null,myPeer:null,rq:null,reqs:[],party:[],hcs:{},inAt:{},rtt:{},ping:0,hts:0,tries:0,recon:false,lastCode:'',lastName:'',verWarn:'',lastSnap:0,pty:[],declined:[],hc:[0,0,0,0,0],c:{a:0,q:0,m:0,f:0,p:0},lastIn:0,sAcc:0,wAcc:0,seq:0,rseq:-1,evId:0,evSeen:0,evl:[],wSeen:-1,endSeen:'',initId:'',hostInit:'',msg:'',offs:[],pm:{},conn:false,n:1,joinOpen:false,name:'Friend'};
 const r1=v=>Math.round(v*10)/10,r2=v=>Math.round(v*100)/100;
 function qev(e,to){if(G&&G.host&&G.evq&&G.evq.length<40)G.evq.push(to?{e,to}:e);}
@@ -2693,7 +2693,7 @@ function netLostHost(){
 }
 
 /* ---- manual (peer to peer) connection: a 2 person "room" over a WebRTC data channel */
-const RTC_CFG={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'},{urls:['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'],username:'openrelayproject',credential:'openrelayproject'}]};
+const RTC_CFG={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'},{urls:'stun:stun.cloudflare.com:3478'},{urls:['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'],username:'openrelayproject',credential:'openrelayproject'}]};
 function b64e(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
 function b64d(t){t=t.replace(/-/g,'+').replace(/_/g,'/');while(t.length%4)t+='=';const s=atob(t),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u;}
 async function codeEnc(d,id){
@@ -2714,7 +2714,8 @@ function p2pRoom(myId,otherId){
   const list=()=>{const a=[mk(myId,st.mine,true)];if(st.other)a.push(st.other);return a;};
   const change=(joined,left)=>{const ch={peers:list(),joined,left,updated:[]};for(const h of st.hs.slice())try{h(ch);}catch(e){console.error(e);}};
   const conn=v=>{for(const f of st.cs.slice())try{f(v);}catch(e){}};
-  const flush=()=>{st.sendT=0;if(!st.open||!st.dc||st.dc.readyState!=='open')return;try{st.dc.send(JSON.stringify({n:++st.seq,p:st.mine}));}catch(e){}};
+  const flush=()=>{st.sendT=0;if(!st.open)return;const ch=(st.dc&&st.dc.readyState==='open')?st.dc:((st.rd&&st.rd.readyState==='open')?st.rd:null);if(!ch)return;try{ch.send(JSON.stringify({n:++st.seq,p:st.mine}));}catch(e){}};
+  const onmsg=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(!m||m.n<=st.rseq)return;st.rseq=m.n;const first=!st.other;st.other=mk(otherId,m.p||{},false);change(first?[st.other]:[],[]);};
   const room={
     name:'p2p',_st:st,
     presence(p){for(const k in p){if(p[k]===null)delete st.mine[k];else st.mine[k]=p[k];}if(!st.sendT)st.sendT=setTimeout(flush,30);return Promise.resolve();},
@@ -2725,9 +2726,15 @@ function p2pRoom(myId,otherId){
     leave(){try{st.dc&&st.dc.close();}catch(e){}try{st.pc&&st.pc.close();}catch(e){}try{room._sg&&room._sg.close();}catch(e){}return Promise.resolve();},
     _attach(dc){
       st.dc=dc;
-      dc.onopen=()=>{st.open=true;flush();conn(true);};
-      dc.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(!m||m.n<=st.rseq)return;st.rseq=m.n;const first=!st.other;st.other=mk(otherId,m.p||{},false);change(first?[st.other]:[],[]);};
-      dc.onclose=()=>{st.open=false;if(st.other){const o=st.other;st.other=null;change([],[o]);}conn(false);};
+      dc.onopen=()=>{const was=st.open;st.open=true;flush();if(!was)conn(true);};
+      dc.onmessage=onmsg;
+      dc.onclose=()=>{if(st.rd&&st.rd.readyState==='open')return;st.open=false;if(st.other){const o=st.other;st.other=null;change([],[o]);}conn(false);};
+    },
+    _attachRelay(rd){
+      st.rd=rd;
+      rd.onopen=()=>{const was=st.open;st.open=true;flush();if(!was)conn(true);};
+      rd.onmessage=onmsg;
+      rd.onclose=()=>{if(st.dc&&st.dc.readyState==='open')return;st.open=false;if(st.other){const o=st.other;st.other=null;change([],[o]);}conn(false);};
     }
   };
   return room;
@@ -2783,6 +2790,10 @@ async function zunpack(t){
   if(t[0]==='Z'){const ds=new DecompressionStream('deflate-raw'),w=ds.writable.getWriter();w.write(b64d(t.slice(1)));w.close();return new TextDecoder().decode(await new Response(ds.readable).arrayBuffer());}
   return new TextDecoder().decode(b64d(t.slice(1)));
 }
+function relayDc(sg,dst){
+  const d={readyState:'connecting',onopen:null,onmessage:null,onclose:null,send(str){sg.sendData(dst,str);},close(){if(d.readyState==='closed')return;d.readyState='closed';d.onclose&&d.onclose();},open(){d.readyState='open';d.onopen&&d.onopen();}};
+  return d;
+}
 function sigPeerjs(id,onmsg){
   return new Promise((res,rej)=>{
     let ws,ok=false,hb=0;
@@ -2814,7 +2825,7 @@ function sigNtfy(id,onmsg){
 /* opens every relay at once; resolves when the first one is ready, later ones join in */
 function sigConnect(id,onmsg){
   return new Promise((res,rej)=>{
-    const live=[],mux={live,send:o=>live.forEach(l=>l.send(o)),close(){mux.closed=true;live.forEach(l=>l.close());}};
+    const live=[],mux={live,send:o=>live.forEach(l=>l.send(o)),sendData(dst,str){const l=live.find(x=>x.name==='peerjs');if(l)l.send({type:'CANDIDATE',dst,payload:{g:str}});},close(){mux.closed=true;live.forEach(l=>l.close());}};
     let done=false,fails=0,idTaken=false;const jobs=[['peerjs',sigPeerjs],['ntfy',sigNtfy]];
     for(const [nm,fn] of jobs){
       fn(id,onmsg).then(r=>{
@@ -2831,13 +2842,19 @@ function sigConnect(id,onmsg){
   });
 }
 async function sigHost(code){
-  const hub=p2pHub(),pcs={};let sg;
+  const hub=p2pHub(),pcs={},rooms={};let sg;
   sg=await sigConnect('dh1-'+code.toLowerCase(),async m=>{
-    const src=m.src;if(!src||m.type!=='OFFER'||pcs[src])return;
+    const src=m.src;if(!src)return;
+    if(m.type==='CANDIDATE'&&m.payload&&m.payload.g!==undefined){
+      let room=rooms[src];if(!room){room=hub.addConn(src);rooms[src]=room;dbg('A friend is connecting (relay)...');}
+      if(!room._st.rd){const rd=relayDc(sg,src);room._attachRelay(rd);rd.open();dbg('Relay link with a friend');}
+      room._st.rd.onmessage&&room._st.rd.onmessage({data:m.payload.g});return;
+    }
+    if(m.type!=='OFFER'||pcs[src])return;
     try{
       const pc=new RTCPeerConnection(RTC_CFG);pcs[src]=pc;
       dbg('A friend is connecting...');NET.msg='A friend is connecting...';
-      const room=hub.addConn(src);room._st.pc=pc;
+      const room=rooms[src]||hub.addConn(src);rooms[src]=room;room._st.pc=pc;
       pc.ondatachannel=e=>room._attach(e.channel);
       pc.oniceconnectionstatechange=()=>dbg('Link: '+pc.iceConnectionState);
       await pc.setRemoteDescription(m.payload.sdp);
@@ -2851,17 +2868,18 @@ async function sigJoin(code){
   const id='dh1c-'+rid(),hostId='dh1-'+code.toLowerCase(),pc=new RTCPeerConnection(RTC_CFG),room=p2pRoom(id,'H');
   room._st.pc=pc;room._attach(pc.createDataChannel('g',{ordered:false}));
   let got=false,sg;
-  pc.oniceconnectionstatechange=()=>dbg('Link: '+pc.iceConnectionState);
+  const startRelay=()=>{if(room._st.rd||room._st.open||NET.room!==room||!sg)return;dbg('Direct link blocked. Using relay mode.');const rd=relayDc(sg,hostId);room._attachRelay(rd);rd.open();};
   sg=await sigConnect(id,async m=>{
     try{
+      if(m.type==='CANDIDATE'&&m.payload&&m.payload.g!==undefined){if(room._st.rd&&room._st.rd.onmessage)room._st.rd.onmessage({data:m.payload.g});return;}
       if(m.type==='ANSWER'&&!got){got=true;dbg('Host answered');await pc.setRemoteDescription(m.payload.sdp);}
       else if(m.type==='EXPIRE'&&!room._st.open&&!got){NET.msg='No host found with that code. Check the code, and make sure the host pressed Host a game.';netRender();}
     }catch(e){console.error(e);}
   });
   room._sg=sg;
-  room.onConnection(c=>{if(c)setTimeout(()=>sg.close(),1500);});
+  room.onConnection(c=>{if(c)setTimeout(()=>{if(room._st.dc&&room._st.dc.readyState==='open')sg.close();},1500);});
   await pc.setLocalDescription(await pc.createOffer());await iceDone(pc);
-  sg.send({type:'OFFER',dst:hostId,payload:{sdp:pc.localDescription}});dbg('Request sent to the code');
+  sg.send({type:'OFFER',dst:hostId,payload:{sdp:pc.localDescription}});dbg('Request sent to the code');pc.oniceconnectionstatechange=()=>{dbg('Link: '+pc.iceConnectionState);if(pc.iceConnectionState==='failed')startRelay();};setTimeout(startRelay,9000);
   setTimeout(()=>{if(NET.room===room&&!room._st.open&&NET.role==='client'&&NET.tries<3&&!NET.hostPeer){NET.tries++;dbg('Retrying ('+NET.tries+'/3)');netJoin(true);return;}if(NET.room===room&&!room._st.open&&NET.role==='client'){NET.msg=got?'The host answered but the direct link failed. Your network may block it. Try the same wifi, or use Manual connection.':'No answer from the host. Check the code, and make sure the host is on this same website and pressed Host a game.';netRender();}},18000);
   return room;
 }
