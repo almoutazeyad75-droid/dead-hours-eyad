@@ -2434,7 +2434,7 @@ window.addEventListener('contextmenu',e=>e.preventDefault());
 
 
 /* ------------------------------------------------------------------ online (state-based: everything travels in room presence, so any viewer can play) */
-const BUILD='b16-1111';
+const BUILD='b17-1111';
 const NET={rt:null,rtP:null,room:null,role:null,code:'',peer:null,hostPeer:null,myPeer:null,rq:null,reqs:[],party:[],hcs:{},inAt:{},rtt:{},ping:0,hts:0,tries:0,recon:false,lastCode:'',lastName:'',verWarn:'',lastSnap:0,pty:[],declined:[],hc:[0,0,0,0,0],c:{a:0,q:0,m:0,f:0,p:0},lastIn:0,sAcc:0,wAcc:0,seq:0,rseq:-1,evId:0,evSeen:0,evl:[],wSeen:-1,endSeen:'',initId:'',hostInit:'',msg:'',offs:[],pm:{},conn:false,n:1,joinOpen:false,name:'Friend'};
 const r1=v=>Math.round(v*10)/10,r2=v=>Math.round(v*100)/100;
 function qev(e,to){if(G&&G.host&&G.evq&&G.evq.length<40)G.evq.push(to?{e,to}:e);}
@@ -2707,6 +2707,7 @@ async function codeDec(c){
   else j=new TextDecoder().decode(b64d(c.slice(1)));
   const o=JSON.parse(j);return {type:o.t,sdp:o.s,id:o.i||''};
 }
+function rtcCfg(){return navigator.onLine===false?{iceServers:[]}:RTC_CFG;}
 function iceDone(pc){return new Promise(res=>{if(pc.iceGatheringState==='complete')return res();const f=()=>{if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',f);res();}};pc.addEventListener('icegatheringstatechange',f);setTimeout(res,4000);});}
 function p2pRoom(myId,otherId){
   const st={mine:{},other:null,hs:[],cs:[],dc:null,pc:null,open:false,seq:0,rseq:-1,sendT:0};
@@ -2765,13 +2766,13 @@ function p2pHub(){
 }
 async function p2pOffer(sid){
   sid=sid||'C1';
-  const pc=new RTCPeerConnection(RTC_CFG),room=p2pRoom('H',sid);room._st.pc=pc;
+  const pc=new RTCPeerConnection(rtcCfg()),room=p2pRoom('H',sid);room._st.pc=pc;
   room._attach(pc.createDataChannel('g',{ordered:false}));
   await pc.setLocalDescription(await pc.createOffer());await iceDone(pc);
   return {room,pc,code:await codeEnc(pc.localDescription,sid)};
 }
 async function p2pAnswer(code){
-  const offer=await codeDec(code),pc=new RTCPeerConnection(RTC_CFG),room=p2pRoom(offer.id||'C1','H');room._st.pc=pc;
+  const offer=await codeDec(code),pc=new RTCPeerConnection(rtcCfg()),room=p2pRoom(offer.id||'C1','H');room._st.pc=pc;
   pc.ondatachannel=e=>room._attach(e.channel);
   await pc.setRemoteDescription(offer);await pc.setLocalDescription(await pc.createAnswer());await iceDone(pc);
   return {room,pc,code:await codeEnc(pc.localDescription)};
@@ -2891,6 +2892,7 @@ function netWire(){
   ];
   NET.conn=R.connected();
 }
+window.addEventListener('offline',()=>{try{if(!NET.role&&$('#onManual')){$('#onManual').checked=true;NET.msg='No internet. Use Manual connection: works on the same router or hotspot, no internet needed.';netRender();}}catch(e){}});
 async function netHostManual(){
   netLeave();NET.role='host';NET.manStep='host';NET.code='';NET.msg='Making your code...';$('#onManOut').value='';netRender();
   let o;const hub=p2pHub();try{o=await hub.addSlot();}catch(e){NET.role=null;NET.msg='Manual connection is not supported in this browser.';netRender();return;}
